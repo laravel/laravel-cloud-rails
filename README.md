@@ -282,6 +282,7 @@ browser.
 ```bash
 bundle install
 bundle exec rake test
+node --test test/*_test.mjs
 ```
 
 ## License
