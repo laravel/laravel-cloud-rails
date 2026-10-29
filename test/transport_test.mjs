@@ -21,7 +21,7 @@ test('a rejected connection tells Action Cable not to reconnect', async () => {
         addEventListener() {}, removeEventListener() {},
         fetch: async () => ({ ok: false, status: 401, json: async () => ({ error: 'Unauthorized connection' }) }),
     };
-    vm.runInNewContext(await readFile(new URL('../lib/laravel_cloud/websockets/transport.js', import.meta.url), 'utf8'), sandbox);
+    vm.runInNewContext(await readFile(new URL('../lib/action_cable/subscription_adapter/cloud/transport.js', import.meta.url), 'utf8'), sandbox);
     const socket = new sandbox.WebSocket('/cable', ['actioncable-v1-json', 'actioncable-unsupported']);
     const events = [];
     socket.onmessage = event => events.push(JSON.parse(event.data));

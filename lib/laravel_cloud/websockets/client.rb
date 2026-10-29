@@ -2,10 +2,11 @@
 
 module LaravelCloud
   module Websockets
-    # The process's own connection to the backend, used to receive broadcasts
-    # and commands routed from other Rails processes.
-    class Bus
-      def initialize(&on_failure)
+    # A server-side Pusher protocol connection, subscribed to private channels
+    # it signs itself. Calls on_failure once the connection is lost.
+    class Client
+      def initialize(logger: nil, &on_failure)
+        @logger = logger
         @failure = on_failure
         @monitor = Monitor.new
         @changed = @monitor.new_cond
@@ -120,7 +121,7 @@ module LaravelCloud
       rescue StandardError => error
         # Only our own messages are logged; they may quote the backend (e.g. "Origin not allowed").
         detail = error.is_a?(Unavailable) ? error.message : error.class
-        ActionCable.server.logger.warn("rails-on-cloud: backend connection lost (#{detail})") unless @closed
+        @logger&.warn("rails-on-cloud: backend connection lost (#{detail})") unless @closed
       ensure
         close
         @failure.call

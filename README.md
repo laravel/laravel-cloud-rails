@@ -152,130 +152,74 @@ config.active_job.queue_adapter = :async
 
 ## WebSockets
 
-Use existing Action Cable channels and browser clients with a Pusher-compatible
-WebSocket backend. The gem runs channel actions in Rails and sends broadcasts
-through the backend.
+Run Action Cable on Laravel Cloud managed WebSockets. Your channels and
+`@rails/actioncable` client work unchanged, and broadcasts reach every Puma
+worker and replica.
 
 ### Setup
 
-Attach a managed WebSocket resource to your Laravel Cloud environment. Cloud
-provides the connection settings through these environment variables:
+Attach a WebSocket application to your Laravel Cloud environment, then use the
+`cloud` adapter in production:
 
-| Variable | Value |
-| --- | --- |
-| `PUSHER_APP_ID` | WebSocket application ID. |
-| `PUSHER_APP_KEY` | Public application key. |
-| `PUSHER_APP_SECRET` | Application secret used to sign requests. |
-| `PUSHER_HOST` | WebSocket server hostname. |
-| `PUSHER_PORT` | WebSocket server port. |
-| `PUSHER_SCHEME` | `http` or `https`. |
+```yaml
+# config/cable.yml
+production:
+  adapter: cloud
+```
 
-When all six variables are nonempty, the gem selects its Action Cable adapter
-and injects its browser transport into your HTML pages. No bridge initializer,
-changes to `config/cable.yml`, or Pusher JavaScript dependency are needed.
-The application secret stays on the server.
+That's all. Laravel Cloud provides the connection settings, and the gem adds
+its browser transport to your HTML pages. No JavaScript changes are needed.
 
-### Action Cable channels
+### Usage
 
-Use your existing [Action Cable](https://guides.rubyonrails.org/v8.1/action_cable_overview.html)
-channel APIs. For example, this channel accepts subscriptions to a demo room:
+Use Action Cable as usual:
 
 ```ruby
 class RoomChannel < ApplicationCable::Channel
   def subscribed
-    return reject unless params[:room] == "demo"
-
     stream_from "room:demo"
   end
-
-  def speak(data)
-    ActionCable.server.broadcast("room:demo", { text: data.fetch("text") })
-  end
 end
-```
 
-Connection authentication still belongs in `ApplicationCable::Connection#connect`.
-The bridge calls your connection and channel code, including subscription
-rejections, lifecycle callbacks, and periodic transmissions. Bridge commands
-use same-origin HTTP requests and a signed HttpOnly cookie issued by the gem.
-Your existing Rails session cookies remain available to connection authentication.
-
-Keep your existing Action Cable client. With the standard `@rails/actioncable`
-package loaded by your application, a subscription looks like this:
-
-```js
-import { createConsumer } from '@rails/actioncable';
-
-const consumer = createConsumer();
-const room = consumer.subscriptions.create(
-    { channel: 'RoomChannel', room: 'demo' },
-    {
-        received(message) {
-            console.log(message.text);
-        },
-    },
-);
-```
-
-After the subscription connects, call channel actions as usual:
-
-```js
-room.perform('speak', { text: 'Hello from Action Cable' });
-```
-
-### Broadcasting
-
-Broadcast from your existing controllers or jobs:
-
-```ruby
 ActionCable.server.broadcast("room:demo", { text: "Your report is ready" })
 ```
 
-Rails receives the stream through a private Pusher channel, applies channel
-callbacks and coders, and forwards each subscriber's frames through a separate
-private channel. `stream_for`, model broadcasts, and Turbo Streams use the same
-adapter. Existing channel prefixes are preserved.
+Connection authentication, subscription rejections, `stream_for`, Turbo Streams
+and `remote_connections.where(...).disconnect` all work as usual.
 
-### Connections and recovery
+### Limitations
 
-The gem routes commands to the Rails process that owns the connection through
-the WebSocket backend. Multiple Puma workers and application replicas use the
-same six variables.
-
-Shared worker heartbeats keep browser clients connected. Each browser connection
-renews its server lease every 30 seconds; inactive connections expire after
-90 seconds. When Rails or the backend restarts, the standard client reconnects
-and subscribes again. Messages broadcast while a client is reconnecting are not
-replayed, as with Action Cable's own adapters.
-
-Each frame sent to a browser, including its JSON envelope, must stay under
-about 9.5 KB, so its publish request fits Reverb's default 10 KB request limit. A larger frame closes the
-connection without reconnecting, and a larger broadcast raises
-`LaravelCloud::Websockets::InvalidCommand`.
-
-`remote_connections.where(...).disconnect` uses Rails' existing connection
-identifiers. Call it when logging out a user or revoking access to stop future
-delivery to their connection.
-
-The HTML transport loads before application scripts and uses the page's CSP
-nonce. The gem adds the managed WebSocket origin to `connect-src`. Clients in
-Web Workers or other contexts without HTML use Rails' native `/cable` transport
-with the standard Action Cable JSON protocol and the same Cloud broadcast adapter.
-
-When `APP_URL` is available, server-side WebSocket connections send its origin.
-Cloud supplies this variable automatically, allowing the WebSocket application
-to restrict connections to your application origin. If Rails logs
-`backend connection lost (Backend error: Origin not allowed)`, check that
-`APP_URL` matches one of the WebSocket application's allowed origins.
+- Each message sent to a browser must stay under about 9.5 KB, Reverb's request
+  limit. A larger message closes that connection without reconnecting.
+- Messages broadcast while a client is reconnecting aren't replayed, as with
+  Action Cable's own adapters.
+- Clients outside HTML pages, such as Web Workers, use Rails' native `/cable`
+  endpoint.
 
 ### Local development
 
-Without all six `PUSHER_*` variables, the bridge stays disabled and your existing
-Action Cable adapter remains in use.
+Managed WebSockets only exist on Laravel Cloud, so use another adapter locally:
 
-To exercise the bridge locally, provide all six variables for a Pusher-compatible
-server. `PUSHER_HOST` and `PUSHER_PORT` must be reachable from both Rails and the
-browser.
+```yaml
+# config/cable.yml
+development:
+  adapter: async
+```
+
+To try the `cloud` adapter locally, run a Reverb server that both Rails
+and the browser can reach, and set `PUSHER_APP_ID`, `PUSHER_APP_KEY`,
+`PUSHER_APP_SECRET`, `PUSHER_HOST`, `PUSHER_PORT` and `PUSHER_SCHEME`.
+
+### Errors
+
+| Error | Raised when |
+| --- | --- |
+| `LaravelCloud::Websockets::NotConfigured` | The `cloud` adapter is used without the `PUSHER_*` variables. |
+| `LaravelCloud::Websockets::PayloadTooLarge` | A broadcast is too large to send. |
+| `LaravelCloud::Websockets::Unavailable` | The WebSocket server can't be reached. |
+
+If Rails logs `backend connection lost (Backend error: Origin not allowed)`,
+check that `APP_URL` matches an allowed origin of your WebSocket application.
 
 ## Development
 
