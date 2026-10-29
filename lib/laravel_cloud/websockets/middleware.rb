@@ -1,8 +1,12 @@
+# frozen_string_literal: true
+
 module LaravelCloud
   module Websockets
+    # Serves the browser transport, injects it into HTML pages, and receives
+    # the transport's channel commands.
     class Middleware
       ENDPOINT = "/__laravel_cloud/cable"
-      COMMANDS = %w[connect ready lease disconnect subscribe unsubscribe message whisper pong history join leave presence].freeze
+      COMMANDS = %w[connect ready lease disconnect subscribe unsubscribe message].freeze
 
       def initialize(app)
         @app = app
@@ -16,7 +20,7 @@ module LaravelCloud
         return command(request) if request.path == ENDPOINT && request.post?
 
         status, headers, body = @app.call(environment)
-        return [status, headers, body] unless status == 200 && headers["content-type"].to_s.include?("text/html") && !headers["content-encoding"]
+        return [status, headers, body] unless status == 200 && headers["content-type"].to_s.include?("text/html") && !headers["content-encoding"] && body.respond_to?(:each)
         allow_backend(request)
         nonce = request.content_security_policy_nonce
         tag = "<script src=\"#{ENDPOINT}.js\"#{nonce ? " nonce=\"#{ERB::Util.html_escape(nonce)}\"" : ''}></script>"
@@ -36,26 +40,9 @@ module LaravelCloud
         unless payload["command"] == "connect"
           raise InvalidCommand, "Request ID required" unless payload["request_id"].is_a?(String) && payload["request_id"].bytesize.between?(1, 64)
         end
-        if %w[subscribe unsubscribe message whisper history join leave presence].include?(payload["command"])
+        if %w[subscribe unsubscribe message].include?(payload["command"])
           raise InvalidCommand, "Invalid identifier" unless payload["identifier"].is_a?(String) && JSON.parse(payload["identifier"]).is_a?(Hash)
-          raise InvalidCommand, "Invalid whisper" if payload["command"] == "whisper" && !payload["data"].is_a?(Hash) && !payload["data"].is_a?(String)
           raise InvalidCommand, "Invalid message" if payload["command"] == "message" && (!payload["data"].is_a?(String) || !JSON.parse(payload["data"]).is_a?(Hash))
-        end
-        if payload.key?("history")
-          history = payload["history"]
-          raise InvalidCommand, "Invalid history" unless history.is_a?(Hash)
-          since = history["since"]
-          raise InvalidCommand, "Invalid history timestamp" unless since.nil? || (since.is_a?(Numeric) && since.finite? && since >= 0)
-          streams = history.fetch("streams", {})
-          raise InvalidCommand, "Invalid history positions" unless streams.is_a?(Hash) && streams.values.all? { |position| position.is_a?(Hash) && position["offset"].is_a?(Integer) && position["offset"] >= 0 && position["epoch"].is_a?(String) }
-        end
-        raise InvalidCommand, "History required" if payload["command"] == "history" && !payload.key?("history")
-        if payload["command"] == "join" || (payload["command"] == "subscribe" && payload.key?("presence"))
-          value = payload["presence"]
-          raise InvalidCommand, "Invalid presence" unless value.is_a?(Hash) && value["id"].is_a?(String) && value["id"].bytesize.between?(1, 200)
-        end
-        if payload["command"] == "presence" && payload.key?("data")
-          raise InvalidCommand, "Invalid presence request" unless payload["data"].nil? || payload["data"].is_a?(Hash)
         end
         return json(401, error: "Connection cookie required") unless Websockets.owner(request)
         status, response = Websockets.runtime.execute(payload, request)
@@ -70,7 +57,9 @@ module LaravelCloud
         policy = request.content_security_policy
         return unless policy
         policy = policy.dup
-        sources = policy.directives["connect-src"] || policy.directives["default-src"] || ["'self'"]
+        # Without either directive, connections are unrestricted; adding one would restrict them.
+        sources = policy.directives["connect-src"] || policy.directives["default-src"]
+        return unless sources
         config = Websockets.settings
         origin = "#{config[:scheme] == 'https' ? 'wss' : 'ws'}://#{config[:host]}:#{config[:port]}"
         policy.connect_src(*(sources + [origin]).uniq)
@@ -94,6 +83,8 @@ module LaravelCloud
       end
     end
 
+    # Inserts the transport right after <head>, before application scripts
+    # capture the WebSocket constructor, without buffering the whole page.
     class HtmlBody
       def initialize(body, tag)
         @body, @tag = body, tag

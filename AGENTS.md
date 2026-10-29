@@ -16,6 +16,9 @@ Active Job adapter (`:cloud`) plus the worker Laravel Cloud runs
 - `lib/active_job/queue_adapters/cloud_adapter.rb` — where Active Job looks up
   `:cloud`; it only delegates.
 - `lib/laravel_cloud/cli.rb` — the `laravel-cloud` command.
+- `lib/laravel_cloud/websockets/` — Action Cable over Cloud's Pusher-compatible
+  WebSockets, enabled by the `PUSHER_*` variables. Start with `runtime.rb`
+  (virtual connections) and `transport.js` (the injected browser socket).
 
 New features get their own namespace beside `Queue` and report through
 `LaravelCloud.events`.

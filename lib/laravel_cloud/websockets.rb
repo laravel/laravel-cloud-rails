@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require "action_cable"
 require "net/http"
 require "openssl"
@@ -9,6 +11,10 @@ require "websocket/driver"
 require "erb"
 
 module LaravelCloud
+  # Runs Action Cable over Laravel Cloud's managed (Pusher-compatible)
+  # WebSockets. Browsers hold the socket to the backend; channel commands
+  # reach Rails over same-origin HTTP (Middleware) and run against a virtual
+  # Action Cable connection (Session), whose frames go back through the backend.
   module Websockets
     class Error < LaravelCloud::Error; end
     class Unavailable < Error; end
@@ -33,14 +39,15 @@ module LaravelCloud
       "private-roc-stream-#{Digest::SHA256.hexdigest(stream)}"
     end
 
-    def self.authorize(socket_id, channel, channel_data = nil)
-      value = [socket_id, channel, channel_data].compact.join(":")
-      signature = OpenSSL::HMAC.hexdigest("SHA256", ENV.fetch("PUSHER_APP_SECRET"), value)
+    def self.authorize(socket_id, channel)
+      signature = OpenSSL::HMAC.hexdigest("SHA256", ENV.fetch("PUSHER_APP_SECRET"), "#{socket_id}:#{channel}")
       "#{ENV.fetch('PUSHER_APP_KEY')}:#{signature}"
     end
 
     def self.event_body(channel, event, data)
       body = JSON.generate(name: event, channels: [channel], data: JSON.generate(data))
+      # Reverb refuses HTTP requests over 10 KB (max_request_size), headers
+      # included; the auth query and headers take roughly 350 bytes.
       raise InvalidCommand, "Message exceeds the backend payload limit" if body.bytesize > 9500
       body
     end
@@ -63,6 +70,7 @@ module LaravelCloud
       raise Unavailable, "WebSocket backend unavailable (#{error.class})"
     end
 
+    # The owner cookie binds connection tokens to the browser that opened them.
     def self.owner(request)
       value = Rack::Utils.parse_cookies_header(request.get_header("HTTP_COOKIE").to_s)["__laravel_cloud_owner"]
       return unless value.is_a?(String) && value.ascii_only? && value.match?(/\A[0-9a-f]{48}\.[0-9a-f]{64}\z/)
@@ -77,25 +85,6 @@ module LaravelCloud
       "#{nonce}.#{signature}"
     end
 
-    def self.broker
-      @broker_lock ||= Mutex.new
-      @broker_lock.synchronize do
-        if @broker_pid != Process.pid
-          @broker = Broker.resolve
-          @broker_pid = Process.pid
-        end
-        @broker
-      end
-    end
-
-    def self.with_position(message)
-      previous = Thread.current[:laravel_cloud_stream_position]
-      Thread.current[:laravel_cloud_stream_position] = message.respond_to?(:position) ? message.position : nil
-      yield
-    ensure
-      Thread.current[:laravel_cloud_stream_position] = previous
-    end
-
     def self.runtime
       @runtime_lock ||= Mutex.new
       @runtime_lock.synchronize do
@@ -106,30 +95,15 @@ module LaravelCloud
       end
     end
 
-    module WhisperStreams
-      def stream_from(broadcasting, callback = nil, **options, &block)
-        self.whisper_stream = broadcasting.to_s if options[:whisper] && respond_to?(:whisper_stream=)
-        super
-      end
-    end
-
     class Railtie < Rails::Railtie
-      initializer "laravel_cloud.websockets", after: "action_cable.set_configs", before: "anycable.disable_action_cable_mount" do |app|
+      initializer "laravel_cloud.websockets", after: "action_cable.set_configs" do |app|
         if Websockets.enabled?
           Websockets.settings
-          ActionCable.server.config.cable = (ActionCable.server.config.cable || {}).merge("adapter" => "laravel_cloud")
-          app.middleware.use(Middleware)
-        end
-      end
-
-      config.after_initialize do
-        if Websockets.enabled?
-          ActionCable::Channel::Base.prepend(WhisperStreams)
-          ActionCable::Channel::Base.prepend(StreamPositions)
-          if defined?(::AnyCable::Rails)
-            require "anycable/rails/channel/presence"
-            ::AnyCable::Rails::Channel::Presence.prepend(ChannelPresence)
+          # A load hook, so Action Cable still reads config/initializers first.
+          ActiveSupport.on_load(:action_cable) do
+            self.cable = (cable || {}).with_indifferent_access.merge(adapter: "laravel_cloud")
           end
+          app.middleware.use(Middleware)
         end
       end
     end
@@ -137,7 +111,5 @@ module LaravelCloud
 end
 
 require_relative "websockets/bus"
-require_relative "websockets/broker"
-require_relative "websockets/presence"
 require_relative "websockets/runtime"
 require_relative "websockets/middleware"

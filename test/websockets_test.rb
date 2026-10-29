@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require "test_helper"
 require "rails"
 require "rack/mock"
@@ -33,6 +35,14 @@ class WebsocketsTest < Minitest::Test
     refute_includes response["content-security-policy"], "unsafe-inline"
   end
 
+  def test_csp_without_connection_directives_stays_unrestricted
+    policy = ActionDispatch::ContentSecurityPolicy.new { |value| value.script_src :self }
+    app = LaravelCloud::Websockets::Middleware.new(->(_env) { [200, { "content-type" => "text/html" }, ["<head></head>"]] })
+    mock = Rack::MockRequest.new(ActionDispatch::ContentSecurityPolicy::Middleware.new(app))
+    response = mock.get("/", "action_dispatch.content_security_policy" => policy)
+    refute_includes response["content-security-policy"], "connect-src"
+  end
+
   def test_activation_requires_all_six_variables
     assert LaravelCloud::Websockets.enabled?
     VARIABLES.each do |name|
@@ -48,14 +58,6 @@ class WebsocketsTest < Minitest::Test
     assert_equal "public-key:#{expected}", signature
     refute_equal signature, LaravelCloud::Websockets.authorize("1.3", "private-room")
     refute_equal signature, LaravelCloud::Websockets.authorize("1.2", "private-other")
-  end
-
-  def test_presence_authorization_covers_the_exact_membership_data
-    data = JSON.generate(user_id: "member", user_info: { name: "Member" })
-    signature = LaravelCloud::Websockets.authorize("1.2", "presence-room", data)
-    expected = OpenSSL::HMAC.hexdigest("SHA256", "private-secret", "1.2:presence-room:#{data}")
-    assert_equal "public-key:#{expected}", signature
-    refute_equal signature, LaravelCloud::Websockets.authorize("1.2", "presence-room", data + " ")
   end
 
   def test_invalid_scheme_and_port_fail_before_connecting
@@ -75,13 +77,6 @@ class WebsocketsTest < Minitest::Test
     assert_equal 413, mock.post("/__laravel_cloud/cable", **headers, input: "x" * 9000).status
     ["null", "[]", "{", '{"command":"unknown"}', '{"command":"message","request_id":"a","identifier":"[]","data":"{}"}'].each do |input|
       assert_equal 400, mock.post("/__laravel_cloud/cable", **headers, input: input).status
-    end
-    [
-      { command: "join", request_id: "a", identifier: '{"channel":"RoomChannel"}', presence: { id: 1 } },
-      { command: "history", request_id: "a", identifier: '{"channel":"RoomChannel"}', history: [] },
-      { command: "history", request_id: "a", identifier: '{"channel":"RoomChannel"}', history: { streams: { stream: { offset: -1, epoch: "a" } } } }
-    ].each do |payload|
-      assert_equal 400, mock.post("/__laravel_cloud/cable", **headers, input: JSON.generate(payload)).status
     end
   end
 
@@ -197,6 +192,15 @@ class WebsocketsTest < Minitest::Test
     adapter = ActionCable::SubscriptionAdapter::LaravelCloud.new(server)
     _, body = capture_publish { adapter.broadcast("room", JSON.generate(text: "hello")) }
     assert_equal [LaravelCloud::Websockets.channel("my-application:room")], JSON.parse(body).fetch("channels")
+  end
+
+  def test_session_frames_use_the_action_cable_coder
+    environment = Rack::MockRequest.env_for("/cable")
+    session = LaravelCloud::Websockets::Session.new(nil, "token", "owner", environment)
+    session.execute("command" => "ready", "request_id" => "ready")
+    _, body = capture_publish { session.connection.transmit(identifier: "room", message: { at: Time.utc(2026, 1, 2) }) }
+    frame = JSON.parse(JSON.parse(body).fetch("data")).fetch("frame")
+    assert_equal({ "identifier" => "room", "message" => { "at" => "2026-01-02T00:00:00.000Z" } }, frame)
   end
 
   def test_backend_http_errors_are_reported_to_the_publisher

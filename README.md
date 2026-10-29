@@ -28,7 +28,7 @@ bundle add laravel-cloud-rails --git https://github.com/laravel/laravel-cloud-ra
 | Feature | Summary |
 | --- | --- |
 | [Managed Queues](#managed-queues) | Laravel Cloud managed queues as an Active Job backend. |
-| [WebSockets](#websockets) | Action Cable and AnyCable bridge to Laravel Cloud managed WebSockets. |
+| [WebSockets](#websockets) | Action Cable over Laravel Cloud managed WebSockets. |
 
 ---
 
@@ -154,8 +154,7 @@ config.active_job.queue_adapter = :async
 
 Use existing Action Cable channels and browser clients with a Pusher-compatible
 WebSocket backend. The gem runs channel actions in Rails and sends broadcasts
-through the backend. You can keep the AnyCable browser client and Rails channel
-state accessors.
+through the backend.
 
 ### Setup
 
@@ -237,91 +236,22 @@ callbacks and coders, and forwards each subscriber's frames through a separate
 private channel. `stream_for`, model broadcasts, and Turbo Streams use the same
 adapter. Existing channel prefixes are preserved.
 
-### AnyCable clients
-
-If your application already uses `@anycable/web`, keep its client API:
-
-```js
-import { createCable } from '@anycable/web';
-
-const consumer = createCable();
-const room = consumer.subscribeTo('RoomChannel', { room: 'demo' });
-
-room.on('message', (message) => {
-    console.log(message.text);
-});
-```
-
-After the subscription connects, call `room.perform('speak', { text: 'Hello' })`.
-Applications using `anycable-rails-core` may also keep `state_attr_accessor` in
-their channels. Channels using `stream_from "room:demo", whisper: true` can
-receive `room.whisper(...)` through the AnyCable Ruby extension.
-
-#### Extended protocol and presence
-
-Applications using AnyCable's extended protocol can keep the same client options:
-
-```js
-const consumer = createCable({ protocol: 'actioncable-v1-ext-json' });
-const room = consumer.subscribeTo('RoomChannel', { room: 'demo' });
-
-room.on('connect', async () => {
-    await room.presence.join('user-42', { name: 'Taylor' });
-    console.log(await room.presence.info());
-});
-```
-
-The bridge translates presence commands to Reverb's presence channels. Multiple
-connections with the same presence ID appear as one member. Unsubscribe, logout,
-and access revocation remove the connection's membership. Presence does not
-require a separate cache.
-
-Keep the standard AnyCable presence concern when managing membership in Ruby:
-
-```ruby
-class PresenceChannel < ApplicationCable::Channel
-  include AnyCable::Rails::Channel::Presence
-
-  def subscribed
-    stream_from "room:demo"
-    join_presence(id: current_user.id, info: { name: current_user.name })
-  end
-end
-```
-
-#### Retained stream messages
-
-Cloud's injected `REDIS_URL` enables bounded stream history, including applications
-using only AnyCable's JavaScript client. When AnyCable's Ruby extension already
-has Redis connection settings, the bridge reuses them. This includes an existing
-Redis broadcast connection, `config/anycable.yml`, and `ANYCABLE_REDIS_URL`.
-Laravel Valkey uses the same Redis protocol and connection URL. The gem installs
-the Redis client dependency, so no additional bridge initializer or application
-dependency is needed.
-
-Reverb carries live messages. The optional cache retains up to 100 messages per
-stream, with a five-minute expiry renewed on publication. Extended clients can
-catch up after disconnects, Rails worker loss, or Reverb restarts while those
-messages remain in the cache. Reconnection authenticates and subscribes again.
-Explicitly configured AnyCable TLS and Sentinel settings are preserved. New
-cache connections verify TLS certificates by default.
-
-If history is unavailable, the channel emits an `info` event whose `type` is
-`history_not_found`. Handle that event by loading current application state
-through your application's API. The bridge rejects unavailable history instead
-of confirming an incomplete replay. Without an existing cache connection,
-extended clients still have live messages and presence.
-
 ### Connections and recovery
 
 The gem routes commands to the Rails process that owns the connection through
 the WebSocket backend. Multiple Puma workers and application replicas use the
-same six variables for live delivery and presence.
+same six variables.
 
 Shared worker heartbeats keep browser clients connected. Each browser connection
 renews its server lease every 30 seconds; inactive connections expire after
-90 seconds. When Rails or the backend restarts, the standard clients reconnect
-and subscribe again.
+90 seconds. When Rails or the backend restarts, the standard client reconnects
+and subscribes again. Messages broadcast while a client is reconnecting are not
+replayed, as with Action Cable's own adapters.
+
+Each frame sent to a browser, including its JSON envelope, must stay under
+about 9.5 KB, so its publish request fits Reverb's default 10 KB request limit. A larger frame closes the
+connection without reconnecting, and a larger broadcast raises
+`LaravelCloud::Websockets::InvalidCommand`.
 
 `remote_connections.where(...).disconnect` uses Rails' existing connection
 identifiers. Call it when logging out a user or revoking access to stop future
@@ -334,7 +264,9 @@ with the standard Action Cable JSON protocol and the same Cloud broadcast adapte
 
 When `APP_URL` is available, server-side WebSocket connections send its origin.
 Cloud supplies this variable automatically, allowing the WebSocket application
-to restrict connections to your application origin.
+to restrict connections to your application origin. If Rails logs
+`backend connection lost (Backend error: Origin not allowed)`, check that
+`APP_URL` matches one of the WebSocket application's allowed origins.
 
 ### Local development
 

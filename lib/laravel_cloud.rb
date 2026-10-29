@@ -27,4 +27,5 @@ require_relative "laravel_cloud/events"
 require_relative "laravel_cloud/queue"
 require_relative "active_job/queue_adapters/cloud_adapter"
 
-require_relative "laravel_cloud/websockets" if defined?(Rails::Railtie)
+# Only for Rails apps that load Action Cable; the gem doesn't depend on it.
+require_relative "laravel_cloud/websockets" if defined?(Rails::Railtie) && defined?(ActionCable::Engine)

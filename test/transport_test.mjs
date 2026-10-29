@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import vm from 'node:vm';
 
-test('heartbeats wait for welcome so AnyCable preserves its replay timestamp', async () => {
+test('a rejected connection tells Action Cable not to reconnect', async () => {
     const transports = [];
     class NativeWebSocket extends EventTarget {
         constructor() {
@@ -14,30 +14,22 @@ test('heartbeats wait for welcome so AnyCable preserves its replay timestamp', a
         close() {}
     }
     const sandbox = {
-        WebSocket: NativeWebSocket, EventTarget, Event, MessageEvent, DOMException,
+        WebSocket: NativeWebSocket, EventTarget, Event, MessageEvent, CloseEvent: Event, DOMException,
         AbortController, AbortSignal, URL, crypto, setTimeout, clearTimeout, setInterval, clearInterval,
         location: { href: 'https://demo.example/' },
         __laravelCloudWebsockets: { scheme: 'https', host: 'socket.example', port: 443, key: 'public-key' },
         addEventListener() {}, removeEventListener() {},
-        fetch: async () => ({ ok: true, json: async () => ({ token: 'session', channels: [] }) }),
+        fetch: async () => ({ ok: false, status: 401, json: async () => ({ error: 'Unauthorized connection' }) }),
     };
     vm.runInNewContext(await readFile(new URL('../lib/laravel_cloud/websockets/transport.js', import.meta.url), 'utf8'), sandbox);
-    const socket = new sandbox.WebSocket('/cable', ['actioncable-v1-ext-json']);
-    const messages = [];
-    socket.addEventListener('message', event => messages.push(JSON.parse(event.data)));
-    const receive = async event => {
-        transports[0].dispatchEvent(new MessageEvent('message', { data: JSON.stringify(event) }));
-        await new Promise(resolve => setImmediate(resolve));
-    };
-    try {
-        await receive({ event: 'pusher:connection_established', data: { socket_id: '1.1' } });
-        await receive({ event: 'cloud-heartbeat', data: { time: 200 } });
-        assert.deepEqual(messages, []);
-        await receive({ event: 'cloud-frame', data: { sequence: 1, frame: { type: 'welcome' } } });
-        await receive({ event: 'cloud-heartbeat', data: { time: 203 } });
-        assert.deepEqual(messages, [{ type: 'welcome' }, { type: 'ping', message: 203 }]);
-    } finally {
-        clearInterval(socket.lease);
-        clearTimeout(socket.deadline);
-    }
+    const socket = new sandbox.WebSocket('/cable', ['actioncable-v1-json', 'actioncable-unsupported']);
+    const events = [];
+    socket.onmessage = event => events.push(JSON.parse(event.data));
+    socket.onclose = () => events.push('close');
+
+    transports[0].dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ event: 'pusher:connection_established', data: { socket_id: '1.1' } }) }));
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.deepEqual(events, [{ type: 'disconnect', reason: 'Unauthorized connection', reconnect: false }, 'close']);
+    assert.equal(socket.readyState, 3);
 });

@@ -1,8 +1,13 @@
+# frozen_string_literal: true
+
 require "action_cable/subscription_adapter/base"
 require "action_cable/subscription_adapter/channel_prefix"
 
 module ActionCable
   module SubscriptionAdapter
+    # Selected automatically when Cloud WebSockets are configured. Broadcasting
+    # only publishes over HTTP, so processes that never subscribe (jobs,
+    # consoles) don't open a backend connection.
     class LaravelCloud < Base
       prepend ChannelPrefix
 
@@ -13,9 +18,7 @@ module ActionCable
       end
 
       def broadcast(channel, payload)
-        broker = ::LaravelCloud::Websockets.broker
-        event, data = broker ? ["cloud-stream", broker.append(channel, payload)] : ["cloud-broadcast", payload]
-        ::LaravelCloud::Websockets.publish(::LaravelCloud::Websockets.channel(channel), event, data)
+        ::LaravelCloud::Websockets.publish(::LaravelCloud::Websockets.channel(channel), "cloud-broadcast", payload)
       end
 
       def subscribe(channel, callback, success_callback = nil)

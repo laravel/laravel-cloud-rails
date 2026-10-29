@@ -1,7 +1,11 @@
+# frozen_string_literal: true
+
 module LaravelCloud
   module Websockets
+    # The process's own connection to the backend, used to receive broadcasts
+    # and commands routed from other Rails processes.
     class Bus
-      def initialize(serial: false, &on_failure)
+      def initialize(&on_failure)
         @failure = on_failure
         @monitor = Monitor.new
         @changed = @monitor.new_cond
@@ -9,7 +13,7 @@ module LaravelCloud
         @joined = {}
         @closed = false
         @last_received = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        @executor = Concurrent::ThreadPoolExecutor.new(min_threads: 1, max_threads: serial ? 1 : 8, max_queue: 1024, fallback_policy: :abort)
+        @executor = Concurrent::ThreadPoolExecutor.new(min_threads: 1, max_threads: 8, max_queue: 1024, fallback_policy: :abort)
         @thread = Thread.new { run }
         @thread.name = "rails-on-cloud-reverb"
       end
@@ -24,20 +28,17 @@ module LaravelCloud
         @socket.write(bytes)
       end
 
-      def subscribe(channel, callback, success = nil, channel_data: nil)
+      def subscribe(channel, callback, success = nil)
         @monitor.synchronize do
           wait_until { @socket_id }
           if !@subscriptions.key?(channel)
             @subscriptions[channel] = []
-            data = { channel: channel, auth: Websockets.authorize(@socket_id, channel, channel_data) }
-            data[:channel_data] = channel_data if channel_data
-            send_event(event: "pusher:subscribe", data: data)
+            send_event(event: "pusher:subscribe", data: { channel: channel, auth: Websockets.authorize(@socket_id, channel) })
           end
           @subscriptions[channel] << callback
           wait_until { @joined[channel] }
         end
-        success.call if success
-        @monitor.synchronize { @joined[channel] }
+        success&.call
       end
 
       def unsubscribe(channel, callback)
@@ -117,7 +118,9 @@ module LaravelCloud
           @monitor.synchronize { @driver.parse(data) }
         end
       rescue StandardError => error
-        ActionCable.server.logger.warn("rails-on-cloud: backend connection lost (#{error.class})") unless @closed
+        # Only our own messages are logged; they may quote the backend (e.g. "Origin not allowed").
+        detail = error.is_a?(Unavailable) ? error.message : error.class
+        ActionCable.server.logger.warn("rails-on-cloud: backend connection lost (#{detail})") unless @closed
       ensure
         close
         @failure.call
@@ -135,12 +138,12 @@ module LaravelCloud
           @socket_id = data.fetch("socket_id")
           @changed.broadcast
         when "pusher_internal:subscription_succeeded"
-          @joined[frame.fetch("channel")] = data
+          @joined[frame.fetch("channel")] = true
           @changed.broadcast
         when "pusher:ping"
           send_event(event: "pusher:pong", data: {})
         when "pusher:error", "pusher:subscription_error"
-          raise Unavailable, "Backend subscription failed"
+          raise Unavailable, "Backend error: #{data.is_a?(Hash) ? data["message"] : data}"
         else
           @subscriptions.fetch(frame["channel"], []).dup.each do |callback|
             @executor.post { callback.call(frame["event"], data) }
