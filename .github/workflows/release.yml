@@ -42,9 +42,9 @@ jobs:
           '
 
       - name: Build the gem
-        run: gem build rails-on-cloud.gemspec --output rails-on-cloud.gem
+        run: gem build laravel-cloud-rails.gemspec --output laravel-cloud-rails.gem
 
       - uses: rubygems/configure-rubygems-credentials@v1.0.0
 
       - name: Publish the gem
-        run: gem push rails-on-cloud.gem
+        run: gem push laravel-cloud-rails.gem

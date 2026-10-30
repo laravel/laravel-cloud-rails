@@ -3,7 +3,7 @@
 require_relative "lib/laravel_cloud/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "rails-on-cloud"
+  spec.name = "laravel-cloud-rails"
   spec.version = LaravelCloud::VERSION
   spec.authors = ["Laravel"]
   spec.summary = "Bring Laravel Cloud features to Ruby on Rails."
