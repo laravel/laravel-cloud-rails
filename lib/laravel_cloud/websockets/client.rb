@@ -16,13 +16,13 @@ module LaravelCloud
         @last_received = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @executor = Concurrent::ThreadPoolExecutor.new(min_threads: 1, max_threads: 8, max_queue: 1024, fallback_policy: :abort)
         @thread = Thread.new { run }
-        @thread.name = "rails-on-cloud-reverb"
+        @thread.name = "laravel-cloud-rails-reverb"
       end
 
       def url
         config = Websockets.settings
         scheme = config[:scheme] == "https" ? "wss" : "ws"
-        "#{scheme}://#{config[:host]}:#{config[:port]}/app/#{URI.encode_www_form_component(config[:key])}?protocol=7&client=rails-on-cloud&version=1"
+        "#{scheme}://#{config[:host]}:#{config[:port]}/app/#{URI.encode_www_form_component(config[:key])}?protocol=7&client=laravel-cloud-rails&version=1"
       end
 
       def write(bytes)
@@ -121,7 +121,7 @@ module LaravelCloud
       rescue StandardError => error
         # Only our own messages are logged; they may quote the backend (e.g. "Origin not allowed").
         detail = error.is_a?(Unavailable) ? error.message : error.class
-        @logger&.warn("rails-on-cloud: backend connection lost (#{detail})") unless @closed
+        @logger&.warn("laravel-cloud-rails: backend connection lost (#{detail})") unless @closed
       ensure
         close
         @failure.call

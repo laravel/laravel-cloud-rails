@@ -178,7 +178,7 @@ module ActionCable
           sessions.each do |session|
             Rails.application.executor.wrap { session.disconnect("server_restart") }
           rescue StandardError => error
-            ActionCable.server.logger.error("rails-on-cloud cleanup failed (#{error.class})")
+            ActionCable.server.logger.error("laravel-cloud-rails cleanup failed (#{error.class})")
           end
           ActionCable.server.connections.dup.each do |connection|
             connection.close(reason: "server_restart") unless connection.is_a?(BridgedConnection)
@@ -234,7 +234,7 @@ module ActionCable
             Websockets.publish(data.fetch("reply_to"), "cloud-reply", { id: data.fetch("id"), result: result })
           end
         rescue StandardError => error
-          ActionCable.server.logger.error("rails-on-cloud command failed (#{error.class})")
+          ActionCable.server.logger.error("laravel-cloud-rails command failed (#{error.class})")
         end
 
         def pulse
