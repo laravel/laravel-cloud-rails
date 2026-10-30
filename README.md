@@ -1,4 +1,4 @@
-# rails-on-cloud
+# laravel-cloud-rails
 
 Laravel Cloud features for Ruby on Rails applications.
 
@@ -12,7 +12,7 @@ Laravel Cloud features for Ruby on Rails applications.
 Install the gem from GitHub:
 
 ```bash
-bundle add rails-on-cloud --git https://github.com/laravel/rails-on-cloud.git
+bundle add laravel-cloud-rails --git https://github.com/laravel/laravel-cloud-rails.git
 ```
 
 ## Features
@@ -150,4 +150,4 @@ bundle exec rake test
 
 ## License
 
-`rails-on-cloud` is open-sourced software licensed under the [MIT license](LICENSE.md).
+`laravel-cloud-rails` is open-sourced software licensed under the [MIT license](LICENSE.md).
