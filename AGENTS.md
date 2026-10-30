@@ -6,19 +6,26 @@ are in `README.md`.
 ## What this is
 
 A gem bringing Laravel Cloud features to Rails, the sibling of
-`laravel/symfony-on-cloud`. The only feature so far is **Managed Queues**: an
-Active Job adapter (`:cloud`) plus the worker Laravel Cloud runs
-(`laravel-cloud queue:work`).
+`laravel/symfony-on-cloud`. **Managed Queues** is an Active Job adapter
+(`:cloud`) plus the worker Laravel Cloud runs (`laravel-cloud queue:work`);
+**WebSockets** is an Action Cable adapter (`cloud`) over Cloud's Reverb.
 
 - `lib/laravel_cloud.rb` — shared pieces: the dashboard event socket (`Events`).
 - `lib/laravel_cloud/queue/` — Managed Queues. Start with `dispatcher.rb`
   (sending) and `worker.rb` (receiving).
 - `lib/active_job/queue_adapters/cloud_adapter.rb` — where Active Job looks up
   `:cloud`; it only delegates.
+- `lib/laravel_cloud/websockets/` — Cloud's managed WebSockets: the `PUSHER_*`
+  settings, HTTP publishing and a server-side socket `Client`.
+- `lib/action_cable/subscription_adapter/cloud/` — Action Cable over Cloud
+  WebSockets (`adapter: cloud`). Start with `runtime.rb` (virtual connections)
+  and `transport.js` (the injected browser socket).
 - `lib/laravel_cloud/cli.rb` — the `laravel-cloud` command.
 
-New features get their own namespace beside `Queue` and report through
-`LaravelCloud.events`.
+`lib/laravel_cloud/` is treated as an interim Cloud SDK for Cloud services;
+the Rails adapters under `lib/active_job/` and `lib/action_cable/` build on it.
+Keep framework code out of new Cloud services. New features get their own namespace
+beside `Queue` and report through `LaravelCloud.events`.
 
 ## Things that are easy to break
 

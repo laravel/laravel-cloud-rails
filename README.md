@@ -2,6 +2,14 @@
 
 Laravel Cloud features for Ruby on Rails applications.
 
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Features](#features)
+- [Managed Queues](#managed-queues)
+- [WebSockets](#websockets)
+- [Development](#development)
+- [License](#license)
+
 ## Requirements
 
 - Ruby 3.2+
@@ -20,6 +28,7 @@ bundle add laravel-cloud-rails --git https://github.com/laravel/laravel-cloud-ra
 | Feature | Summary |
 | --- | --- |
 | [Managed Queues](#managed-queues) | Laravel Cloud managed queues as an Active Job backend. |
+| [WebSockets](#websockets) | Action Cable over Laravel Cloud managed WebSockets. |
 
 ---
 
@@ -141,11 +150,83 @@ config.active_job.queue_adapter = :async
 
 ---
 
+## WebSockets
+
+Run Action Cable on Laravel Cloud managed WebSockets. Your channels and
+`@rails/actioncable` client work unchanged, and broadcasts reach every Puma
+worker and replica.
+
+### Setup
+
+Attach a WebSocket application to your Laravel Cloud environment, then use the
+`cloud` adapter in production:
+
+```yaml
+# config/cable.yml
+production:
+  adapter: cloud
+```
+
+That's all. Laravel Cloud provides the connection settings, and the gem adds
+its browser transport to your HTML pages. No JavaScript changes are needed.
+
+### Usage
+
+Use Action Cable as usual:
+
+```ruby
+class RoomChannel < ApplicationCable::Channel
+  def subscribed
+    stream_from "room:demo"
+  end
+end
+
+ActionCable.server.broadcast("room:demo", { text: "Your report is ready" })
+```
+
+Connection authentication, subscription rejections, `stream_for`, Turbo Streams
+and `remote_connections.where(...).disconnect` all work as usual.
+
+### Limitations
+
+- Each message sent to a browser must stay under about 9.5 KB, Reverb's request
+  limit. A larger message closes that connection without reconnecting.
+- Messages broadcast while a client is reconnecting aren't replayed, as with
+  Action Cable's own adapters.
+- Clients outside HTML pages, such as Web Workers, use Rails' native `/cable`
+  endpoint.
+
+### Local development
+
+Managed WebSockets only exist on Laravel Cloud, so use another adapter locally:
+
+```yaml
+# config/cable.yml
+development:
+  adapter: async
+```
+
+To try the `cloud` adapter locally, run a Reverb server that both Rails
+and the browser can reach, and set `PUSHER_APP_ID`, `PUSHER_APP_KEY`,
+`PUSHER_APP_SECRET`, `PUSHER_HOST`, `PUSHER_PORT` and `PUSHER_SCHEME`.
+
+### Errors
+
+| Error | Raised when |
+| --- | --- |
+| `LaravelCloud::Websockets::NotConfigured` | The `cloud` adapter is used without the `PUSHER_*` variables. |
+| `LaravelCloud::Websockets::PayloadTooLarge` | A broadcast is too large to send. |
+| `LaravelCloud::Websockets::Unavailable` | The WebSocket server can't be reached. |
+
+If Rails logs `backend connection lost (Backend error: Origin not allowed)`,
+check that `APP_URL` matches an allowed origin of your WebSocket application.
+
 ## Development
 
 ```bash
 bundle install
 bundle exec rake test
+node --test test/*_test.mjs
 ```
 
 ## License
