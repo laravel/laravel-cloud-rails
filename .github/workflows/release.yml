@@ -44,7 +44,20 @@ jobs:
       - name: Build the gem
         run: gem build laravel-cloud-rails.gemspec --output laravel-cloud-rails.gem
 
-      - uses: rubygems/configure-rubygems-credentials@v1.0.0
+      # Exchanges the OIDC token by hand because no release of
+      # rubygems/configure-rubygems-credentials sends `owner` yet, and
+      # RubyGems.org needs it to create a gem from a pending trusted publisher.
+      - name: Get a RubyGems API key
+        env:
+          OWNER: ${{ vars.RUBYGEMS_OWNER_ID }}
+        run: |
+          jwt=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=rubygems.org" | jq -r .value)
+          key=$(jq -n --arg jwt "$jwt" --arg owner "$OWNER" '{jwt: $jwt} + (if $owner == "" then {} else {owner: $owner} end)' |
+            curl -fsS -X POST -H "Content-Type: application/json" --data @- \
+              https://rubygems.org/api/v1/oidc/trusted_publisher/exchange_token | jq -r .rubygems_api_key)
+          echo "::add-mask::$key"
+          echo "GEM_HOST_API_KEY=$key" >> "$GITHUB_ENV"
 
       - name: Publish the gem
         run: gem push laravel-cloud-rails.gem
