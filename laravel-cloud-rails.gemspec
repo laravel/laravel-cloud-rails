@@ -7,8 +7,7 @@ Gem::Specification.new do |spec|
   spec.version = LaravelCloud::VERSION
   spec.authors = ["Laravel"]
   spec.summary = "Bring Laravel Cloud features to Ruby on Rails."
-  spec.description = "A feature-based integration for running Rails on Laravel Cloud, whose first " \
-                     "capability is Managed Queues as an Active Job adapter."
+  spec.description = "Laravel Cloud integration for Ruby on Rails"
   spec.homepage = "https://laravel.com/cloud"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2"
